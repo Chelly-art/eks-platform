@@ -1,0 +1,137 @@
+name: EKS platform (vpc -> eks -> components)
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Terraform action"
+        type: choice
+        options: [plan, apply, destroy]
+        default: plan
+      region:
+        description: "AWS region"
+        default: us-east-1
+      cluster_name:
+        description: "EKS cluster name"
+        default: platform-eks
+
+concurrency:
+  group: eks-platform-${{ inputs.cluster_name }}
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}   # repo variable
+
+jobs:
+  # ---------- Build order: bootstrap -> vpc -> eks -> components -> verify ----------
+  bootstrap:
+    if: inputs.action != 'destroy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+      - run: ./scripts/bootstrap-state.sh
+        env:
+          AWS_REGION: ${{ inputs.region }}
+
+  vpc:
+    if: inputs.action != 'destroy'
+    needs: bootstrap
+    uses: ./.github/workflows/terraform-layer.yml
+    secrets: inherit
+    with:
+      working_dir: vpc
+      state_key: vpc/terraform.tfstate
+      action: ${{ inputs.action }}
+      region: ${{ inputs.region }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      cluster_name: ${{ inputs.cluster_name }}
+
+  eks:
+    if: inputs.action != 'destroy'
+    needs: vpc
+    uses: ./.github/workflows/terraform-layer.yml
+    secrets: inherit
+    with:
+      working_dir: eks
+      state_key: eks/terraform.tfstate
+      action: ${{ inputs.action }}
+      region: ${{ inputs.region }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      cluster_name: ${{ inputs.cluster_name }}
+      verify_cluster: true
+
+  components:
+    if: inputs.action != 'destroy'
+    needs: eks
+    uses: ./.github/workflows/terraform-layer.yml
+    secrets: inherit
+    with:
+      working_dir: components
+      state_key: components/terraform.tfstate
+      action: ${{ inputs.action }}
+      region: ${{ inputs.region }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      cluster_name: ${{ inputs.cluster_name }}
+
+  verify:
+    if: inputs.action == 'apply'
+    needs: components
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ inputs.region }}
+      CLUSTER_NAME: ${{ inputs.cluster_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+      - run: ./scripts/verify-cluster.sh
+      - run: ./scripts/verify-components.sh
+
+  # ---------- Destroy order (reverse): components -> eks -> vpc ----------
+  destroy-components:
+    if: inputs.action == 'destroy'
+    uses: ./.github/workflows/terraform-layer.yml
+    secrets: inherit
+    with:
+      working_dir: components
+      state_key: components/terraform.tfstate
+      action: destroy
+      region: ${{ inputs.region }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      cluster_name: ${{ inputs.cluster_name }}
+
+  destroy-eks:
+    if: inputs.action == 'destroy'
+    needs: destroy-components
+    uses: ./.github/workflows/terraform-layer.yml
+    secrets: inherit
+    with:
+      working_dir: eks
+      state_key: eks/terraform.tfstate
+      action: destroy
+      region: ${{ inputs.region }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      cluster_name: ${{ inputs.cluster_name }}
+
+  destroy-vpc:
+    if: inputs.action == 'destroy'
+    needs: destroy-eks
+    uses: ./.github/workflows/terraform-layer.yml
+    secrets: inherit
+    with:
+      working_dir: vpc
+      state_key: vpc/terraform.tfstate
+      action: destroy
+      region: ${{ inputs.region }}
+      state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      cluster_name: ${{ inputs.cluster_name }}

@@ -1,0 +1,79 @@
+name: terraform-layer (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      working_dir: { required: true, type: string }
+      state_key:   { required: true, type: string }
+      action:      { required: true, type: string } # plan | apply | destroy
+      region:      { required: true, type: string }
+      state_bucket: { required: true, type: string }
+      cluster_name: { required: true, type: string }
+      k8s_version:  { required: false, type: string, default: "1.36" }
+      verify_cluster: { required: false, type: boolean, default: false }
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.action == 'plan' && 'plan-only' || 'infrastructure' }}
+    defaults:
+      run:
+        working-directory: ${{ inputs.working_dir }}
+    env:
+      AWS_REGION: ${{ inputs.region }}
+      STATE_BUCKET: ${{ inputs.state_bucket }}
+      CLUSTER_NAME: ${{ inputs.cluster_name }}
+      K8S_VERSION: ${{ inputs.k8s_version }}
+      TF_VAR_region: ${{ inputs.region }}
+      TF_VAR_state_bucket: ${{ inputs.state_bucket }}
+      TF_VAR_cluster_name: ${{ inputs.cluster_name }}
+      TF_INPUT: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ inputs.region }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.13"
+
+      - name: Init (S3 backend, native S3 lockfile)
+        run: |
+          terraform init \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="key=${{ inputs.state_key }}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true"
+
+      - name: Format + validate
+        run: |
+          terraform fmt -check -recursive
+          terraform validate
+
+      - name: Plan
+        run: |
+          if [ "${{ inputs.action }}" = "destroy" ]; then
+            terraform plan -destroy -out=tfplan -lock-timeout=10m
+          else
+            terraform plan -out=tfplan -lock-timeout=10m
+          fi
+
+      - name: Apply / Destroy
+        if: inputs.action != 'plan'
+        run: terraform apply -auto-approve -lock-timeout=10m tfplan
+
+      - name: Verify state (S3 object, lock released, no drift)
+        if: inputs.action == 'apply'
+        run: ${{ github.workspace }}/scripts/verify-state.sh "${{ inputs.state_key }}"
+
+      - name: Verify cluster (version, add-ons, nodes)
+        if: inputs.action == 'apply' && inputs.verify_cluster
+        run: ${{ github.workspace }}/scripts/verify-cluster.sh

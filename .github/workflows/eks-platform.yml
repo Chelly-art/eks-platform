@@ -25,7 +25,7 @@ on:
         default: plan
       region:
         description: "AWS region"
-        default: us-east-1
+        default: eu-west-2
       cluster_name:
         description: "EKS cluster name"
         default: platform-eks
@@ -56,7 +56,7 @@ jobs:
         run: |
           if [ "$EVENT" = "pull_request" ]; then ACTION=plan; else ACTION="${IN_ACTION:-apply}"; fi
           echo "action=$ACTION" >> "$GITHUB_OUTPUT"
-          echo "region=${IN_REGION:-us-east-1}" >> "$GITHUB_OUTPUT"
+          echo "region=${IN_REGION:-eu-west-2}" >> "$GITHUB_OUTPUT"
           echo "cluster_name=${IN_CLUSTER:-platform-eks}" >> "$GITHUB_OUTPUT"
 
   # ---------- Build order: bootstrap -> vpc -> eks -> components -> verify ----------

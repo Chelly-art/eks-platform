@@ -59,7 +59,7 @@ resource "helm_release" "traefik" {
   version          = var.traefik_chart_version
   timeout          = 900
 
-    values = [yamlencode({
+  values = [yamlencode({
     service = {
       type = var.traefik_service_type
       annotations = var.traefik_service_type == "LoadBalancer" ? tomap({
@@ -67,6 +67,9 @@ resource "helm_release" "traefik" {
       }) : tomap({})
     }
   })]
+
+  depends_on = [helm_release.cert_manager]
+}
 
 # ---------- Kyverno ----------
 resource "helm_release" "kyverno" {

@@ -9,7 +9,7 @@ variable "eks_state_key" {
 }
 variable "enable_kata" {
   type    = bool
-  default = true
+  default = false
 }
 
 # Chart versions: null = latest. Pin these after the first successful run.

@@ -37,7 +37,7 @@ variable "node_desired_size" {
 }
 variable "enable_kata_node_group" {
   type    = bool
-  default = true
+  default = false
 }
 variable "kata_instance_types" {
   type    = list(string)

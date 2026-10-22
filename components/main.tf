@@ -59,17 +59,14 @@ resource "helm_release" "traefik" {
   version          = var.traefik_chart_version
   timeout          = 900
 
-  values = [yamlencode({
+    values = [yamlencode({
     service = {
-      type = "LoadBalancer"
-      annotations = {
+      type = var.traefik_service_type
+      annotations = var.traefik_service_type == "LoadBalancer" ? tomap({
         "service.beta.kubernetes.io/aws-load-balancer-type" = "nlb"
-      }
+      }) : tomap({})
     }
   })]
-
-  depends_on = [helm_release.cert_manager]
-}
 
 # ---------- Kyverno ----------
 resource "helm_release" "kyverno" {

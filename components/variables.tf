@@ -45,3 +45,8 @@ variable "monitoring_chart_version" {
   type    = string
   default = null
 }
+variable "traefik_service_type" {
+  type        = string
+  default     = "ClusterIP" # switch to "LoadBalancer" once AWS enables ELB on the account
+  description = "ClusterIP | NodePort | LoadBalancer"
+}

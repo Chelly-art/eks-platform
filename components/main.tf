@@ -10,12 +10,28 @@ resource "helm_release" "calico" {
   version          = var.calico_chart_version
   timeout          = 900
 
+  # Operator only; the Installation resource comes from calico_config below
   values = [yamlencode({
-    installation = {
-      kubernetesProvider = "EKS"
-      cni                = { type = "AmazonVPC" }
-    }
+    installation = { enabled = false }
+    apiServer    = { enabled = false }
+    goldmane     = { enabled = false }
+    whisker      = { enabled = false }
   })]
+}
+
+# Give the operator time to register its CRDs
+resource "time_sleep" "calico_crds" {
+  create_duration = "45s"
+  depends_on      = [helm_release.calico]
+}
+
+resource "helm_release" "calico_config" {
+  name      = "calico-config"
+  namespace = "tigera-operator"
+  chart     = "${path.module}/charts/calico-config"
+  timeout   = 900
+
+  depends_on = [time_sleep.calico_crds]
 }
 
 # ---------- cert-manager ----------
@@ -30,7 +46,7 @@ resource "helm_release" "cert_manager" {
 
   values = [yamlencode({ crds = { enabled = true } })]
 
-  depends_on = [helm_release.calico]
+  depends_on = [helm_release.calico_config]
 }
 
 # ---------- Traefik ----------
@@ -108,7 +124,7 @@ resource "helm_release" "kata" {
     nodeSelector = { "katacontainers.io/kata-runtime" = "true" }
   })]
 
-  depends_on = [helm_release.calico]
+  depends_on = [helm_release.calico_config]
 }
 
 # ---------- Monitoring: Prometheus, Alertmanager, Grafana ----------
